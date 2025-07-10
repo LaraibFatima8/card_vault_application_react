@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, Auth } from 'firebase/auth';
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc, Firestore } from 'firebase/firestore';
 
 // Firebase configuration from environment variables
 const firebaseConfig = {
@@ -15,45 +15,70 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+// Debug: Log Firebase config to check if environment variables are loaded
+console.log('Firebase Config:', firebaseConfig);
+
 const appId = process.env.NEXT_PUBLIC_APP_ID || 'card-vault-app';
 
+interface CompanyData {
+  id: string;
+  companyName?: string;
+  contactPerson?: string;
+  phoneNumber?: string;
+  email?: string;
+  website?: string;
+  address?: string;
+  timestamp?: number;
+  uploadedBy?: string;
+}
+
 function App() {
-  const [db, setDb] = useState(null);
-  const [auth, setAuth] = useState(null);
-  const [userId, setUserId] = useState(null);
+  const [db, setDb] = useState<Firestore | null>(null);
+  const [auth, setAuth] = useState<Auth | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [companies, setCompanies] = useState([]);
-  const [selectedCompany, setSelectedCompany] = useState(null);
+  const [companies, setCompanies] = useState<CompanyData[]>([]);
+  const [selectedCompany, setSelectedCompany] = useState<CompanyData | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [companyToDelete, setCompanyToDelete] = useState(null);
+  const [companyToDelete, setCompanyToDelete] = useState<CompanyData | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editFormData, setEditFormData] = useState({});
+  const [editFormData, setEditFormData] = useState<Partial<CompanyData>>({});
 
   // State for camera functionality
   const [showCameraModal, setShowCameraModal] = useState(false);
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const mediaStreamRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Initialize Firebase and set up auth listener
   useEffect(() => {
     try {
+      // Validate Firebase configuration
+      if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+        throw new Error('Firebase configuration is incomplete. Please check your environment variables.');
+      }
+
+      console.log('Initializing Firebase with config:', firebaseConfig);
       const app = initializeApp(firebaseConfig);
       const firestoreDb = getFirestore(app);
       const firebaseAuth = getAuth(app);
 
+      console.log('Firebase initialized successfully');
       setDb(firestoreDb);
       setAuth(firebaseAuth);
 
       const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
         if (user) {
+          console.log('User already signed in:', user.uid);
           setUserId(user.uid);
         } else {
           try {
+            console.log('Attempting anonymous sign-in...');
             await signInAnonymously(firebaseAuth);
+            console.log('Anonymous sign-in successful');
             setUserId(firebaseAuth.currentUser?.uid || crypto.randomUUID());
           } catch (error) {
             console.error("Error during authentication:", error);
@@ -78,10 +103,10 @@ function App() {
       const q = query(companyCollectionRef);
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        const companyList = snapshot.docs.map(doc => ({
+        const companyList: CompanyData[] = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
-        }));
+        } as CompanyData));
         companyList.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
         setCompanies(companyList);
       }, (error) => {
@@ -210,8 +235,8 @@ function App() {
   };
 
   // Handler for file input change
-  const handleFileInputChange = (event) => {
-    const file = event.target.files[0];
+  const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) {
       setMessage('No file selected.');
       return;
@@ -277,8 +302,16 @@ function App() {
       const canvas = canvasRef.current;
       const context = canvas.getContext('2d');
 
+      if (!context) {
+        setMessage('Failed to get canvas context.');
+        return;
+      }
+
+      // Set canvas dimensions to match video feed
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
+
+      // Draw the current video frame onto the canvas
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const imageData = canvas.toDataURL('image/jpeg', 0.9);
@@ -301,7 +334,7 @@ function App() {
     }
 
     const headers = ["Company Name", "Contact Person", "Phone Number", "Email", "Website", "Address"];
-    const csvRows = [];
+    const csvRows: string[] = [];
 
     csvRows.push(headers.join(','));
 
@@ -365,12 +398,12 @@ function App() {
     setShowEditModal(true);
   };
 
-  const handleEditChange = (e) => {
+  const handleEditChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setEditFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleEditSubmit = async (e) => {
+  const handleEditSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (db && editFormData.id) {
       try {
@@ -385,7 +418,7 @@ function App() {
           address: editFormData.address,
         });
         setMessage('Company card updated successfully!');
-        setSelectedCompany(editFormData);
+        setSelectedCompany(editFormData as CompanyData);
       } catch (error) {
         console.error("Error updating document:", error);
         setMessage(`Error updating card: ${error.message}`);
